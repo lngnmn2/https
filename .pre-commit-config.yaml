@@ -1,0 +1,31 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks: []
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: Cargo Format
+        entry: cargo fmt
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-check
+        name: Cargo Check
+        entry: cargo check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-test
+        name: Cargo Test
+        entry: cargo test
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: Cargo Clippy
+        entry: cargo clippy
+        language: system
+        types: [rust]
+        pass_filenames: false

@@ -1,0 +1,63 @@
+[package]
+name = "https_client"
+version = "0.1.0"
+edition = "2024"
+# Remove default features to avoid pulling in unnecessary OS-level side effects
+
+[dependencies]
+openssl = "0.10"
+url = "2.4"
+thiserror = "2.0"
+log = "0.4"
+
+[lints.rust]
+# The absolute baseline: No unsafe allowed, period.
+unsafe_code = "forbid"
+unknown_lints = "allow"
+
+# Enforce explicit types and documentation to mimic mathematical specifications
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+missing_copy_implementations = "deny"
+
+# Deny all standard warnings to enforce absolute cleanliness
+warnings = "deny"
+
+# Prevent hidden state via global mutability
+tls_models = "deny" 
+
+[lints.clippy]
+# Elevate standard lints to strict failures
+all = "deny"
+pedantic = "deny"
+nursery = "deny"
+
+# --- RESTRICTION LINTS FOR FUNCTIONAL PURITY ---
+# These lints exist in Clippy's 'restriction' category (which are allow-by-default).
+# We enable them here to force a referentially transparent, total-function paradigm.
+
+# 1. Enforce Total Functions (No crashing, no hidden control flow)
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny" # Forbids `array[index]` which can panic; forces `.get(index)`
+fallible_impl_from = "deny"
+
+# 2. Restrict Imperative / Procedural Idioms
+shadow_unrelated = "deny"
+shadow_reuse = "deny"
+shadow_same = "deny" # Enforces strict single-assignment; a let binding is final.
+while_let_on_iterator = "deny" # Pushes you toward .map() and .fold()
+needless_return = "deny" # Forces expression-oriented implicit returns
+let_and_return = "deny" # Forces direct expression evaluation
+as_conversions = "deny" # Forbids raw `as` casts; forces `TryFrom` (safe morphisms)
+pattern_type_mismatch = "deny" # Forces strict type matching, no implicit deref
+
+# 3. State and Mutation Restrictions (The closest native approximation to banning mut)
+mut_mut = "deny" # Forbids `&mut &mut` 
+unnecessary_mut_passed = "deny"
+rest_pat_in_fully_bound_structs = "deny" # Forces exhaustive pattern matching on state
+

@@ -1,0 +1,11 @@
+edition = "2024"
+max_width = 80
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+
+# Please use a nightly rustfmt for these settings.
+unstable_features = true
+imports_granularity = "Module"
+wrap_comments = true
+
