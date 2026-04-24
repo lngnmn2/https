@@ -31,7 +31,7 @@ impl Response {
     }
 
     /// Returns the HTTP status.
-    pub fn status(&self) -> Status {
+    pub const fn status(&self) -> Status {
         self.status
     }
 
@@ -41,7 +41,7 @@ impl Response {
     }
 
     /// Returns the response body.
-    pub fn body(&self) -> &Body {
+    pub const fn body(&self) -> &Body {
         &self.body
     }
 }

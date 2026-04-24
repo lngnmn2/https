@@ -70,31 +70,25 @@ pub struct Header {
 impl Header {
     /// Pure Smart Constructor for Header.
     pub fn try_new(n: impl TryInto<HeaderName, Error=HttpError>, v: impl TryInto<HeaderValue, Error=HttpError>) -> Result<Self, HttpError> {
-        Ok(Self {
-            name: n.try_into()?,
-            value: v.try_into()?,
-        })
+        Ok(Self { name: n.try_into()?, value: v.try_into()? })
     }
     
     /// Returns the header name.
-    pub fn name(&self) -> &HeaderName {
+    pub const fn name(&self) -> &HeaderName {
         &self.name
     }
 
     /// Returns the header value.
-    pub fn value(&self) -> &HeaderValue {
+    pub const fn value(&self) -> &HeaderValue {
         &self.value
     }
 }
 
 impl TryFrom<&str> for Header {
     type Error = HttpError;
-    /// Constructs a Header from a "Name: Value" string.
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         let parts: Vec<&str> = s.splitn(2, ':').map(|p| p.trim()).collect();
-        if parts.len() != 2 {
-            return Err(HttpError::HeaderError(format!("Malformed Header Line: {}", s)));
-        }
+        if parts.len() != 2 { return Err(HttpError::HeaderError(format!("Malformed Header Line: {}", s))); }
         Self::try_new(parts[0], parts[1])
     }
 }
@@ -108,20 +102,12 @@ impl std::fmt::Display for Header {
 /// Formal Specification for Financial Grade Security Headers.
 pub fn validate_security_headers(headers: &[Header]) -> Result<(), HttpError> {
     let check = |name: &str| headers.iter().any(|h| h.name().as_ref().eq_ignore_ascii_case(name));
-
-    if !check("Strict-Transport-Security") {
-        return Err(HttpError::ResponseError("Security Violation: Missing HSTS".into()));
-    }
-    
+    if !check("Strict-Transport-Security") { return Err(HttpError::ResponseError("Security Violation: Missing HSTS".into())); }
     let nosniff = headers.iter().find(|h| h.name().as_ref().eq_ignore_ascii_case("X-Content-Type-Options"));
     match nosniff {
         Some(h) if h.value().as_ref().eq_ignore_ascii_case("nosniff") => (),
         _ => return Err(HttpError::ResponseError("Security Violation: Missing/Invalid Nosniff".into())),
     }
-
-    if !check("Content-Security-Policy") {
-        return Err(HttpError::ResponseError("Security Violation: Missing CSP".into()));
-    }
-
+    if !check("Content-Security-Policy") { return Err(HttpError::ResponseError("Security Violation: Missing CSP".into())); }
     Ok(())
 }

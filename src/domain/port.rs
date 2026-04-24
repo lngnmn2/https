@@ -1,4 +1,4 @@
-//! # Port Domain Model
+//! # TCP Port Domain Model
 //!
 //! Type-safe representation of TCP port numbers.
 
@@ -9,6 +9,11 @@ pub struct Port(u16);
 impl Port {
     /// The standard HTTPS port (443).
     pub const HTTPS: Self = Self(443);
+
+    /// Returns the raw u16 representation.
+    pub const fn code(self) -> u16 {
+        self.0
+    }
 }
 
 impl From<u16> for Port {

@@ -27,6 +27,17 @@ pub enum Method {
     Patch,
 }
 
+impl Method {
+    /// Converts a Method to its standard string representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Method::Get => "GET", Method::Post => "POST", Method::Put => "PUT",
+            Method::Delete => "DELETE", Method::Head => "HEAD", Method::Options => "OPTIONS",
+            Method::Connect => "CONNECT", Method::Trace => "TRACE", Method::Patch => "PATCH",
+        }
+    }
+}
+
 impl TryFrom<&str> for Method {
     type Error = HttpError;
     /// Constructs a Method from a string slice, case-insensitive.
@@ -47,18 +58,13 @@ impl TryFrom<&str> for Method {
 }
 
 impl From<Method> for &'static str {
-    /// Converts a Method to its standard string representation.
     fn from(m: Method) -> Self {
-        match m {
-            Method::Get => "GET", Method::Post => "POST", Method::Put => "PUT",
-            Method::Delete => "DELETE", Method::Head => "HEAD", Method::Options => "OPTIONS",
-            Method::Connect => "CONNECT", Method::Trace => "TRACE", Method::Patch => "PATCH",
-        }
+        m.as_str()
     }
 }
 
 impl std::fmt::Display for Method {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", Into::<&'static str>::into(*self))
+        write!(f, "{}", self.as_str())
     }
 }

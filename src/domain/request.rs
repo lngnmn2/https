@@ -44,7 +44,6 @@ pub type InitialRequest = SecureRequest<HasHost, Initial>;
 
 impl TryFrom<(&str, &str)> for InitialRequest {
     type Error = HttpError;
-    /// Constructs an InitialRequest from a method and URL string pair.
     fn try_from((m, u): (&str, &str)) -> Result<Self, Self::Error> {
         SecureRequest::try_new(m.try_into()?, u)
     }
@@ -56,9 +55,6 @@ impl TryFrom<(&str, &str)> for InitialRequest {
 
 impl SecureRequest<HasHost, Initial> {
     /// Initial Algebra: Creation of the basic Request structure.
-    /// 
-    /// # Errors
-    /// Returns `HttpError` if URL is invalid or scheme is insecure.
     pub fn try_new(method: Method, url: impl Into<String>) -> Result<Self, HttpError> {
         let u = Url::parse(&url.into())?;
         if u.scheme() != "https" { return Err(HttpError::InsecureScheme(u.scheme().into())); }
@@ -71,9 +67,6 @@ impl SecureRequest<HasHost, Initial> {
     }
 
     /// Monadic Transformation: Adds a header.
-    /// 
-    /// # Errors
-    /// Returns `HttpError` if header validation fails.
     pub fn with_header(self, k: impl Into<String>, v: impl Into<String>) -> Result<Self, HttpError> {
         let h = Header::try_new(k.into(), v.into())?;
         let mut hs: Vec<Header> = self.headers.to_vec();
@@ -99,11 +92,11 @@ impl SecureRequest<HasHost, Initial> {
 
 impl<H, B> SecureRequest<H, B> {
     /// Returns the HTTP method.
-    pub fn method(&self) -> &Method { &self.method }
+    pub const fn method(&self) -> &Method { &self.method }
     /// Returns the request URL.
-    pub fn url(&self) -> &Url { &self.url }
+    pub const fn url(&self) -> &Url { &self.url }
     /// Returns the request headers.
     pub fn headers(&self) -> &[Header] { &self.headers }
     /// Returns the request body.
-    pub fn body(&self) -> &Body { &self.body }
+    pub const fn body(&self) -> &Body { &self.body }
 }

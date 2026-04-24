@@ -41,7 +41,7 @@ pub enum Status {
 
 impl Status {
     /// Returns the numerical status code.
-    pub fn code(&self) -> u16 {
+    pub const fn code(&self) -> u16 {
         match self {
             Status::Ok => 200, Status::Created => 201, Status::Accepted => 202, Status::NoContent => 204,
             Status::MovedPermanently => 301, Status::Found => 302,
@@ -52,7 +52,7 @@ impl Status {
     }
 
     /// Returns the standard reason phrase.
-    pub fn reason_phrase(&self) -> &'static str {
+    pub const fn reason_phrase(&self) -> &'static str {
         match self {
             Status::Ok => "OK", Status::Created => "Created", Status::Accepted => "Accepted", Status::NoContent => "No Content",
             Status::MovedPermanently => "Moved Permanently", Status::Found => "Found",
