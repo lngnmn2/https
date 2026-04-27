@@ -1,14 +1,14 @@
-//! # Interpreter Layer
+//! # Interpreter Layer (Imperative Shell)
 //!
-//! Implementation of the Imperative Shell that executes planned interaction graphs.
+//! Implementation of the STG runtime and protocol transducer.
 
-/// High-level runner entry point.
+/// High-level interaction runner.
 pub mod runner;
 /// TCP socket adapters.
 pub mod socket;
-/// TLS channel adapters.
+/// TLS adapter.
 pub mod tls;
-/// STG Machine operational core.
+/// GHC STG Machine implementation.
 pub mod stg;
-/// Protocol planning and transducer logic.
+/// Interaction transducer (DSL -> Initial Algebra).
 pub mod protocol;

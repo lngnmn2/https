@@ -1,266 +1,280 @@
 //! # STG Machine Implementation (Spineless Tagless G-Machine)
 //! 
-//! Rigorous implementation of the formal STG transition rules.
-//! Incorporates 40+ years of functional programming research.
+//! Pure functional implementation using recursion and persistent data.
 
-use crate::domain::error::HttpError;
-use crate::domain::response::Response;
-use crate::domain::host::Host;
-use crate::domain::port::Port;
-use crate::domain::status::Status;
-use crate::domain::body::Body;
+use crate::domain::{HttpError, Response, Host, Port, Status, Body, SecurityLevel};
 use crate::interpreter::{socket, tls, protocol};
-use core::mem;
 use openssl::ssl::SslStream;
 use std::net::TcpStream;
-use std::io::Write;
 use std::rc::Rc;
+use std::ops::Deref;
 
 /// Pointer into the persistent graph.
 pub type Addr = usize;
 
-// ============================================================================
-// 1. INITIAL ALGEBRA (STG CORE SYNTAX)
-// ============================================================================
+// --- PERSISTENT DATA STRUCTURES ---
+
+/// Immutable Linked List for the STG Stack.
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum List<T> { 
+    /// End of list.
+    Nil, 
+    /// A shared value and the tail.
+    Cons(Rc<T>, Rc<List<T>>) 
+}
+
+impl<T> List<T> {
+    /// Pushes a value onto the list.
+    pub fn push(self: Rc<Self>, val: T) -> Rc<Self> { Rc::new(List::Cons(Rc::new(val), self)) }
+    /// Pops a value from the list (Returns Rc-wrapped tail).
+    pub fn pop_rc(self: Rc<Self>) -> Option<(Rc<T>, Rc<List<T>>)> {
+        match self.deref() {
+            List::Nil => None,
+            List::Cons(h, t) => Some((h.clone(), t.clone())),
+        }
+    }
+}
+
+// --- INITIAL ALGEBRA (STG CORE SYNTAX) ---
 
 /// Atomic values (WHNF or Pointers).
-#[derive(Debug, Clone)]
-pub enum Atom<A> {
-    /// A literal value in WHNF (Shared via Rc).
-    Lit(Rc<A>),
-    /// A pointer to a heap address.
-    Var(Addr),
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub enum Atom<A> { 
+    /// A literal value.
+    Lit(Rc<A>), 
+    /// A heap address.
+    Var(Addr) 
+}
+
+impl<A> Clone for Atom<A> {
+    fn clone(&self) -> Self {
+        match self {
+            Atom::Lit(v) => Atom::Lit(v.clone()),
+            Atom::Var(a) => Atom::Var(*a),
+        }
+    }
 }
 
 /// The Expression AST (Core Language).
 pub enum Expr<A> {
-    /// WHNF result.
-    Pure(Atom<A>),
-    /// Pointer entry (Graph traversal).
+    /// Evaluate an atom.
+    Pure(Atom<A>), 
+    /// Enter a heap address.
     App(Addr),
-    /// Continuation-passing strict evaluation (Monadic Bind).
+    /// Monadic Bind (Strict evaluation).
     Case(Box<Expr<A>>, Box<dyn FnOnce(Response) -> Expr<A> + 'static>),
-    /// Lazy thunk allocation.
+    /// Lazy allocation.
     Let(Box<Closure<A>>, Box<dyn Fn(Addr) -> Expr<A> + 'static>),
-
-    /// Domain Primitive: Suspend to establish TCP connection.
-    OpConnect(Host, Port),
-    /// Domain Primitive: Suspend to perform TLS handshake.
-    OpHandshake(Host),
-    /// Domain Primitive: Suspend to write data.
-    OpWrite(Vec<u8>),
-    /// Domain Primitive: Suspend to read response.
-    OpRead,
+    /// TCP connection primitive.
+    OpConnect(Host, Port), 
+    /// TLS handshake primitive.
+    OpHandshake(Host), 
+    /// Write primitive.
+    OpWrite(Rc<[u8]>), 
+    /// Read primitive with security level.
+    OpRead(SecurityLevel),
 }
 
 /// A Heap Closure (Entry Code + Payload).
-pub struct Closure<A> {
-    /// Memoization flag.
-    pub is_updatable: bool,
-    /// The code to execute when entering this closure.
-    pub expr: Box<Expr<A>>,
+pub struct Closure<A> { 
+    /// True if the result should be memoized.
+    pub is_updatable: bool, 
+    /// The code to execute.
+    pub expr: Box<Expr<A>> 
 }
 
-// ============================================================================
-// 2. RUNTIME STATE (MACHINE TOPOLOGY)
-// ============================================================================
+// --- RUNTIME STATE ---
 
 /// A Node in the persistent graph (Heap).
-pub enum Node<A> {
+pub enum Node<A> { 
     /// A suspended computation.
-    Closure(Box<Closure<A>>),
-    /// A memoized result.
-    Whnf(Rc<A>),
-    /// An indirection created during graph reduction.
-    Indirection(Addr),
-    /// Loop detection sentinel.
-    Blackhole,
+    Closure(Box<Closure<A>>), 
+    /// A memoized value.
+    Whnf(Rc<A>), 
+    /// A pointer to another node.
+    Indirection(Addr), 
+    /// Loop sentinel.
+    Blackhole 
 }
 
 /// STG Stack Frames (Continuations).
-pub enum Frame<A> {
-    /// Update Frame: Instructs the machine to memoize the result.
-    Update(Addr),
-    /// Case Frame: The continuation for a Case expression.
-    ReturnTo(Box<dyn FnOnce(Response) -> Expr<A> + 'static>),
+pub enum Frame<A> { 
+    /// Update the heap with the result.
+    Update(Addr), 
+    /// Return to a Case continuation.
+    ReturnTo(Box<dyn FnOnce(Response) -> Expr<A> + 'static>) 
 }
 
-/// Control signal for the evaluation loop.
-enum Control<A> {
-    Continue(Expr<A>),
-    Halt(Rc<A>),
+/// Control signal for the recursive evaluation loop.
+pub enum Control<A> { 
+    /// Continue evaluation with the next expression.
+    Continue(Expr<A>), 
+    /// Halt evaluation with a final value.
+    Halt(Rc<A>) 
 }
 
-/// Represents the intermediate state of an HTTPS connection.
+/// The intermediate state of a network connection.
 #[derive(Debug)]
-pub enum ConnectionState {
-    /// No active connection.
-    Empty,
-    /// Established TCP connection.
-    Tcp(TcpStream),
-    /// Established TLS session over TCP.
-    Tls(SslStream<TcpStream>),
+pub enum Connection { 
+    /// Unconnected.
+    Empty, 
+    /// TCP connected.
+    Tcp(TcpStream), 
+    /// TLS established.
+    Tls(SslStream<TcpStream>) 
 }
 
-/// The Spineless Tagless G-Machine structure.
+/// The Persistent STG Machine State.
 pub struct StgMachine<A> {
-    heap: Vec<Node<A>>,
-    stack: Vec<Frame<A>>,
-    conn: ConnectionState,
+    /// The shared heap.
+    pub heap: Rc<[Node<A>]>,
+    /// The persistent stack.
+    pub stack: Rc<List<Frame<A>>>,
+    /// The network connection state.
+    pub conn: Connection,
 }
 
-// ============================================================================
-// 3. OPERATIONAL SEMANTICS (TRANSITION RULES)
-// ============================================================================
-
-impl<A: 'static + Clone> StgMachine<A> {
-    /// Creates a new STG Machine.
+impl<A: 'static> StgMachine<A> {
+    /// Creates a new, empty machine.
     pub fn new() -> Self {
-        Self {
-            heap: Vec::with_capacity(128), stack: Vec::with_capacity(64),
-            conn: ConnectionState::Empty,
-        }
+        Self { heap: Rc::from([]), stack: Rc::new(List::Nil), conn: Connection::Empty }
     }
 
-    /// Primary Evaluation Loop (Natural Transformation).
-    pub fn evaluate(&mut self, mut expr: Expr<A>) -> Result<Rc<A>, HttpError> {
-        loop {
-            expr = match expr {
-                Expr::Let(c, f) => self.rule_let(c, f),
-                Expr::Case(t, k) => self.rule_case(*t, k),
-                Expr::App(a) => self.enter_address(a)?,
-                Expr::Pure(a) => {
-                    let v = self.unwrap_atom(a)?;
-                    match self.rule_ret(v)? {
-                        Control::Continue(e) => e,
-                        Control::Halt(v) => return Ok(v),
-                    }
-                }
-                p => self.rule_prim(p)?,
-            };
-        }
+    /// Pure Recursive Evaluation.
+    pub fn evaluate(self, expr: Expr<A>) -> Result<Rc<A>, HttpError> {
+        self.step(expr).and_then(|(next_machine, control)| match control {
+            Control::Continue(e) => next_machine.evaluate(e),
+            Control::Halt(v) => Ok(v),
+        })
     }
 
-    fn rule_let(&mut self, c: Box<Closure<A>>, f: Box<dyn Fn(Addr) -> Expr<A> + 'static>) -> Expr<A> {
-        let a = self.allocate(Node::Closure(c));
-        f(a)
-    }
-
-    fn rule_case(&mut self, t: Expr<A>, k: Box<dyn FnOnce(Response) -> Expr<A> + 'static>) -> Expr<A> {
-        self.stack.push(Frame::ReturnTo(k));
-        t
-    }
-
-    fn rule_ret(&mut self, v: Rc<A>) -> Result<Control<A>, HttpError> {
-        match self.stack.pop() {
-            None => Ok(Control::Halt(v)),
-            Some(Frame::Update(upd)) => {
-                self.heap[upd] = Node::Whnf(v.clone());
-                Ok(Control::Continue(Expr::Pure(Atom::Lit(v))))
+    fn step(self, expr: Expr<A>) -> Result<(Self, Control<A>), HttpError> {
+        match expr {
+            Expr::Let(c, f) => {
+                let addr = self.heap.len();
+                let next_heap = self.heap.iter().cloned().chain(std::iter::once(Node::Closure(c))).collect::<Rc<[_]>>();
+                Ok((StgMachine { heap: next_heap, ..self }, Control::Continue(f(addr))))
             }
-            Some(Frame::ReturnTo(_)) => Err(HttpError::RuntimeError("Type Mismatch: Expected Response".into())),
+            Expr::Case(t, k) => {
+                let next_stack = self.stack.push(Frame::ReturnTo(k));
+                Ok((StgMachine { stack: next_stack, ..self }, Control::Continue(*t)))
+            }
+            Expr::App(a) => self.enter_address(a).map(|(m, e)| (m, Control::Continue(e))),
+            Expr::Pure(atom) => self.unwrap_atom(atom).and_then(|(m, v)| m.rule_ret(v)),
+            p => self.rule_prim(p).map(|(m, e)| (m, Control::Continue(e))),
         }
     }
 
-    fn rule_prim(&mut self, p: Expr<A>) -> Result<Expr<A>, HttpError> {
+    fn rule_ret(self, v: Rc<A>) -> Result<(Self, Control<A>), HttpError> {
+        match self.stack.pop_rc() {
+            None => Ok((StgMachine { stack: Rc::new(List::Nil), ..self }, Control::Halt(v))),
+            Some((frame, next_stack)) => match frame.deref() {
+                Frame::Update(upd) => {
+                    let next_heap = self.heap.iter().enumerate().map(|(i, n)| if i == *upd { Node::Whnf(v.clone()) } else { n.clone() }).collect::<Rc<[_]>>();
+                    Ok((StgMachine { heap: next_heap, stack: next_stack, ..self }, Control::Continue(Expr::Pure(Atom::Lit(v)))))
+                }
+                _ => Err(HttpError::RuntimeError(Rc::from("Return Type Mismatch"))),
+            }
+        }
+    }
+
+    fn rule_prim(self, p: Expr<A>) -> Result<(Self, Expr<A>), HttpError> {
         match p {
-            Expr::OpConnect(h, port) => {
-                self.conn = handle_connect(h.as_ref(), port.into())?;
-                self.yield_response(dummy_response())
+            Expr::OpConnect(h, p) => {
+                let conn = handle_connect(h.as_ref(), p.code())?;
+                StgMachine { conn, ..self }.yield_r(dummy())
             }
             Expr::OpHandshake(h) => {
-                let s = mem::replace(&mut self.conn, ConnectionState::Empty);
-                self.conn = handle_handshake(s, h.as_ref())?;
-                self.yield_response(dummy_response())
+                let conn = handle_handshake(self.conn, h.as_ref())?;
+                StgMachine { conn, ..self }.yield_r(dummy())
             }
             Expr::OpWrite(d) => {
-                let s = mem::replace(&mut self.conn, ConnectionState::Empty);
-                self.conn = handle_write(s, d)?;
-                self.yield_response(dummy_response())
+                let conn = handle_write(self.conn, &*d)?;
+                StgMachine { conn, ..self }.yield_r(dummy())
             }
-            Expr::OpRead => {
-                match mem::replace(&mut self.conn, ConnectionState::Empty) {
-                    ConnectionState::Tls(s) => self.yield_response(protocol::read_response(s)?),
-                    _ => Err(HttpError::RuntimeError("Invalid State for Read".into())),
+            Expr::OpRead(level) => match self.conn {
+                Connection::Tls(s) => {
+                    let (next_s, res) = protocol::read_response_pure(s, level)?;
+                    StgMachine { conn: Connection::Tls(next_s), ..self }.yield_r(res)
                 }
-            }
-            _ => Err(HttpError::RuntimeError("Invalid Primitive".into())),
+                _ => Err(HttpError::RuntimeError(Rc::from("Invalid State for Read"))),
+            },
+            _ => Err(HttpError::RuntimeError(Rc::from("Invalid Primitive"))),
         }
     }
 
-    fn allocate(&mut self, n: Node<A>) -> Addr {
-        let a = self.heap.len(); self.heap.push(n); a
-    }
-
-    fn yield_response(&mut self, r: Response) -> Result<Expr<A>, HttpError> {
-        match self.stack.pop() {
-            Some(Frame::ReturnTo(k)) => Ok(k(r)),
-            _ => Err(HttpError::RuntimeError("Stack Underflow".into())),
+    fn yield_r(self, r: Response) -> Result<(Self, Expr<A>), HttpError> {
+        match self.stack.pop_rc() {
+            Some((frame, next_stack)) => match Rc::try_unwrap(frame).ok() {
+                Some(Frame::ReturnTo(k)) => Ok((StgMachine { stack: next_stack, ..self }, k(r))),
+                _ => Err(HttpError::RuntimeError(Rc::from("Frame Unwrapping Failed"))),
+            },
+            _ => Err(HttpError::RuntimeError(Rc::from("Stack Underflow"))),
         }
     }
 
-    fn unwrap_atom(&mut self, a: Atom<A>) -> Result<Rc<A>, HttpError> {
+    fn unwrap_atom(self, a: Atom<A>) -> Result<(Self, Rc<A>), HttpError> {
         match a {
-            Atom::Lit(v) => Ok(v),
-            Atom::Var(addr) => match self.enter_address(addr)? {
-                Expr::Pure(Atom::Lit(v)) => Ok(v),
-                _ => Err(HttpError::RuntimeError("Atom Resolution Failed".into())),
-            }
+            Atom::Lit(v) => Ok((self, v)),
+            Atom::Var(addr) => self.enter_address(addr).and_then(|(m, e)| match e {
+                Expr::Pure(Atom::Lit(v)) => Ok((m, v)),
+                _ => Err(HttpError::RuntimeError(Rc::from("Atom Resolution Failed"))),
+            })
         }
     }
 
-    fn enter_address(&mut self, addr: Addr) -> Result<Expr<A>, HttpError> {
-        match mem::replace(&mut self.heap[addr], Node::Blackhole) {
+    fn enter_address(self, addr: Addr) -> Result<(Self, Expr<A>), HttpError> {
+        let node = self.heap.get(addr).cloned().ok_or(HttpError::RuntimeError(Rc::from("Invalid Addr")))?;
+        match node {
             Node::Closure(c) => {
-                if c.is_updatable { self.stack.push(Frame::Update(addr)); }
-                Ok(*c.expr)
+                let next_heap = self.heap.iter().enumerate().map(|(i, n)| if i == addr { Node::Blackhole } else { n.clone() }).collect::<Rc<[_]>>();
+                let next_stack = if c.is_updatable { self.stack.push(Frame::Update(addr)) } else { self.stack };
+                Ok((StgMachine { heap: next_heap, stack: next_stack, ..self }, *c.expr))
             }
-            Node::Indirection(a) => { self.heap[addr] = Node::Indirection(a); Ok(Expr::App(a)) }
-            Node::Whnf(v) => { self.heap[addr] = Node::Whnf(v.clone()); Ok(Expr::Pure(Atom::Lit(v))) }
-            Node::Blackhole => Err(HttpError::RuntimeError("Divergence Detected (Blackhole)".into())),
+            Node::Indirection(a) => self.enter_address(a),
+            Node::Whnf(v) => Ok((self, Expr::Pure(Atom::Lit(v)))),
+            Node::Blackhole => Err(HttpError::RuntimeError(Rc::from("Blackhole"))),
         }
     }
 }
 
-// ----------------------------------------------------------------------------
-// HELPERS (IMPERATIVE SHELL ADAPTERS)
-// ----------------------------------------------------------------------------
-
-fn dummy_response() -> Response {
-    Response::new(Status::Ok, vec![], Body::default())
-}
-
-fn handle_connect(host: &str, port: u16) -> Result<ConnectionState, HttpError> {
-    let s = socket::connect_tcp(host, port)?;
+fn dummy() -> Response { Response::new(Status::Ok, Rc::from([]), Body::default()) }
+fn handle_connect(h: &str, p: u16) -> Result<Connection, HttpError> {
+    let s = socket::connect_tcp(h, p)?;
     let t = std::time::Duration::from_secs(10);
-    s.set_read_timeout(Some(t))?; s.set_write_timeout(Some(t))?;
-    Ok(ConnectionState::Tcp(s))
+    let _ = s.set_read_timeout(Some(t))?;
+    let _ = s.set_write_timeout(Some(t))?;
+    Ok(Connection::Tcp(s))
 }
-
-fn handle_handshake(state: ConnectionState, host: &str) -> Result<ConnectionState, HttpError> {
-    match state {
-        ConnectionState::Tcp(s) => Ok(ConnectionState::Tls(tls::connect_tls(host, s)?)),
-        _ => Err(HttpError::RuntimeError("Handshake Invariant Violated".into())),
+fn handle_handshake(st: Connection, h: &str) -> Result<Connection, HttpError> {
+    match st { Connection::Tcp(s) => Ok(Connection::Tls(tls::connect_tls(h, s)?)), _ => Err(HttpError::RuntimeError(Rc::from("Handshake Invariant"))) }
+}
+fn handle_write(st: Connection, d: &[u8]) -> Result<Connection, HttpError> {
+    match st { 
+        Connection::Tls(s) => {
+            let next_s = tls::write_all_pure(s, d)?;
+            Ok(Connection::Tls(next_s))
+        } 
+        _ => Err(HttpError::RuntimeError(Rc::from("Write Invariant"))) 
     }
 }
 
-fn handle_write(state: ConnectionState, data: Vec<u8>) -> Result<ConnectionState, HttpError> {
-    match state {
-        ConnectionState::Tls(mut s) => {
-            s.write_all(&data)?; s.flush()?;
-            Ok(ConnectionState::Tls(s))
-        }
-        _ => Err(HttpError::RuntimeError("Write Invariant Violated".into())),
-    }
+impl<A> Clone for Node<A> { fn clone(&self) -> Self { match self { Node::Closure(c) => Node::Closure(Box::new(Closure { is_updatable: c.is_updatable, expr: c.expr.clone() })), Node::Whnf(v) => Node::Whnf(v.clone()), Node::Indirection(a) => Node::Indirection(*a), Node::Blackhole => Node::Blackhole } } }
+impl<A> Clone for Expr<A> { 
+    fn clone(&self) -> Self { 
+        match self { 
+            Expr::Pure(a) => Expr::Pure(a.clone()), 
+            Expr::App(a) => Expr::App(*a), 
+            _ => panic!("Unclonable Expr") 
+        } 
+    } 
 }
 
-// ----------------------------------------------------------------------------
-// BOILERPLATE (DEBUG/DEFAULT)
-// ----------------------------------------------------------------------------
-
-impl<A> std::fmt::Debug for Node<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { match self { Node::Closure(_) => write!(f, "Closure"), Node::Whnf(_) => write!(f, "Whnf"), Node::Indirection(a) => write!(f, "Indirection({})", a), Node::Blackhole => write!(f, "Blackhole") } } }
-impl<A> std::fmt::Debug for Frame<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { match self { Frame::Update(a) => write!(f, "Update({})", a), Frame::ReturnTo(_) => write!(f, "ReturnTo") } } }
-impl<A> std::fmt::Debug for StgMachine<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("StgMachine").field("hp", &self.heap.len()).field("sp", &self.stack.len()).field("conn", &self.conn).finish() } }
-impl<A> std::fmt::Debug for Expr<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { match self { Expr::Pure(_) => write!(f, "Pure"), Expr::App(a) => write!(f, "App({})", a), Expr::Case(_, _) => write!(f, "Case"), Expr::Let(_, _) => write!(f, "Let"), Expr::OpConnect(_, _) => write!(f, "OpConnect"), Expr::OpHandshake(_) => write!(f, "OpHandshake"), Expr::OpWrite(_) => write!(f, "OpWrite"), Expr::OpRead => write!(f, "OpRead") } } }
-impl<A> std::fmt::Debug for Closure<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("Closure").field("upd", &self.is_updatable).finish() } }
-impl<A: 'static + Clone> Default for StgMachine<A> { fn default() -> Self { Self::new() } }
+// --- MANUAL DEBUG IMPLEMENTATIONS ---
+impl<A> std::fmt::Debug for Expr<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Expr") } }
+impl<A> std::fmt::Debug for Closure<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Closure") } }
+impl<A> std::fmt::Debug for Node<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Node") } }
+impl<A> std::fmt::Debug for Frame<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Frame") } }
+impl<A> std::fmt::Debug for Control<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Control") } }
+impl<A> std::fmt::Debug for StgMachine<A> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("StgMachine").field("heap_len", &self.heap.len()).field("conn", &self.conn).finish() } }
+impl<A: 'static> Default for StgMachine<A> { fn default() -> Self { Self::new() } }

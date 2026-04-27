@@ -1,67 +1,83 @@
 //! # HTTP Header Domain Model
 //!
 //! Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers
-//! Enforces RFC 7230 invariants via "Correctness by Construction".
+//! Pure functional header model using persistent strings.
 
 use super::error::HttpError;
 use std::rc::Rc;
+use std::ops::Deref;
 
 /// Validated Header Name (RFC 7230 token).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HeaderName(Rc<str>);
+
+impl Deref for HeaderName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
 
 impl TryFrom<Rc<str>> for HeaderName {
     type Error = HttpError;
     fn try_from(s: Rc<str>) -> Result<Self, Self::Error> {
-        if s.is_empty() || !s.chars().all(|c| c.is_ascii_alphanumeric() || "-!#$%&'*+.^_`|~".contains(c)) {
-            return Err(HttpError::HeaderError(format!("Invalid Header Name Token: {}", s)));
+        let is_token = !s.is_empty() 
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || "-!#$%&'*+.^_`|~".contains(c));
+        
+        if is_token { 
+            Ok(Self(s)) 
+        } else { 
+            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Name Token: {}", s)))) 
         }
-        Ok(Self(s))
     }
-}
-
-impl TryFrom<String> for HeaderName {
-    type Error = HttpError;
-    fn try_from(s: String) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
 }
 
 impl TryFrom<&str> for HeaderName {
     type Error = HttpError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::try_from(Rc::from(s))
+    }
 }
 
-impl AsRef<str> for HeaderName { fn as_ref(&self) -> &str { &self.0 } }
+impl AsRef<str> for HeaderName { fn as_ref(&self) -> &str { self.0.as_ref() } }
 impl std::fmt::Display for HeaderName { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }
 
 /// Validated Header Value (RFC 7230 visible ASCII).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct HeaderValue(Rc<str>);
+
+impl Deref for HeaderValue {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
 
 impl TryFrom<Rc<str>> for HeaderValue {
     type Error = HttpError;
     fn try_from(s: Rc<str>) -> Result<Self, Self::Error> {
-        if s.chars().any(|c| (c as u32) < 32 && c != '\t') {
-            return Err(HttpError::HeaderError(format!("Invalid Header Value: {}", s)));
+        let is_valid = s.chars().all(|c| (c as u32) >= 32 && (c as u32) <= 126 || c == '\t');
+        
+        if is_valid { 
+            Ok(Self(s)) 
+        } else { 
+            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Value: {}", s)))) 
         }
-        Ok(Self(s))
     }
-}
-
-impl TryFrom<String> for HeaderValue {
-    type Error = HttpError;
-    fn try_from(s: String) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
 }
 
 impl TryFrom<&str> for HeaderValue {
     type Error = HttpError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::try_from(Rc::from(s))
+    }
 }
 
-impl AsRef<str> for HeaderValue { fn as_ref(&self) -> &str { &self.0 } }
+impl AsRef<str> for HeaderValue { fn as_ref(&self) -> &str { self.0.as_ref() } }
 impl std::fmt::Display for HeaderValue { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }
 
 /// An Atomic HTTP Header.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     name: HeaderName,
     value: HeaderValue,
@@ -74,22 +90,19 @@ impl Header {
     }
     
     /// Returns the header name.
-    pub const fn name(&self) -> &HeaderName {
-        &self.name
-    }
-
+    pub fn name(&self) -> &HeaderName { &self.name }
     /// Returns the header value.
-    pub const fn value(&self) -> &HeaderValue {
-        &self.value
-    }
+    pub fn value(&self) -> &HeaderValue { &self.value }
 }
 
 impl TryFrom<&str> for Header {
     type Error = HttpError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let parts: Vec<&str> = s.splitn(2, ':').map(|p| p.trim()).collect();
-        if parts.len() != 2 { return Err(HttpError::HeaderError(format!("Malformed Header Line: {}", s))); }
-        Self::try_new(parts[0], parts[1])
+        let parts: Rc<[&str]> = s.splitn(2, ':').collect();
+        if parts.len() != 2 { 
+            return Err(HttpError::HeaderError(Rc::from(format!("Malformed Header Line: {}", s)))); 
+        }
+        Self::try_new(parts[0].trim(), parts[1].trim())
     }
 }
 
@@ -99,15 +112,36 @@ impl std::fmt::Display for Header {
     }
 }
 
+/// Levels of security enforcement for headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SecurityLevel {
+    /// No mandatory headers enforced.
+    None,
+    /// Minimum requirements for production (Ensures framing integrity).
+    Minimal,
+    /// Enforces Nosniff and Basic CSP.
+    Standard,
+    /// Enforces HSTS, Nosniff, and Strict CSP (Financial Grade).
+    #[default] Strict,
+}
+
 /// Formal Specification for Financial Grade Security Headers.
-pub fn validate_security_headers(headers: &[Header]) -> Result<(), HttpError> {
-    let check = |name: &str| headers.iter().any(|h| h.name().as_ref().eq_ignore_ascii_case(name));
-    if !check("Strict-Transport-Security") { return Err(HttpError::ResponseError("Security Violation: Missing HSTS".into())); }
-    let nosniff = headers.iter().find(|h| h.name().as_ref().eq_ignore_ascii_case("X-Content-Type-Options"));
-    match nosniff {
-        Some(h) if h.value().as_ref().eq_ignore_ascii_case("nosniff") => (),
-        _ => return Err(HttpError::ResponseError("Security Violation: Missing/Invalid Nosniff".into())),
+pub fn validate_security_headers(headers: &[Header], level: SecurityLevel) -> Result<(), HttpError> {
+    if matches!(level, SecurityLevel::None) || matches!(level, SecurityLevel::Minimal) { 
+        return Ok(()); 
     }
-    if !check("Content-Security-Policy") { return Err(HttpError::ResponseError("Security Violation: Missing CSP".into())); }
+    
+    let check = |name: &str| headers.iter().any(|h| h.name().as_ref().eq_ignore_ascii_case(name));
+    
+    if matches!(level, SecurityLevel::Strict) && !check("Strict-Transport-Security") { 
+        return Err(HttpError::ResponseError(Rc::from("Missing HSTS"))); 
+    }
+    
+    headers.iter().find(|h| h.name().as_ref().eq_ignore_ascii_case("X-Content-Type-Options"))
+        .filter(|h| h.value().as_ref().eq_ignore_ascii_case("nosniff"))
+        .ok_or(HttpError::ResponseError(Rc::from("Missing Nosniff")))?;
+
+    if !check("Content-Security-Policy") { return Err(HttpError::ResponseError(Rc::from("Missing CSP"))); }
+
     Ok(())
 }

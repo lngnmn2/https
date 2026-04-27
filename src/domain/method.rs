@@ -3,6 +3,7 @@
 //! Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods
 
 use super::error::HttpError;
+use std::rc::Rc;
 
 /// Validated HTTP request methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,31 +41,15 @@ impl Method {
 
 impl TryFrom<&str> for Method {
     type Error = HttpError;
-    /// Constructs a Method from a string slice, case-insensitive.
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_uppercase().as_str() {
-            "GET" => Ok(Method::Get),
-            "POST" => Ok(Method::Post),
-            "PUT" => Ok(Method::Put),
-            "DELETE" => Ok(Method::Delete),
-            "HEAD" => Ok(Method::Head),
-            "OPTIONS" => Ok(Method::Options),
-            "CONNECT" => Ok(Method::Connect),
-            "TRACE" => Ok(Method::Trace),
-            "PATCH" => Ok(Method::Patch),
-            _ => Err(HttpError::MethodError(s.to_string())),
+            "GET" => Ok(Method::Get), "POST" => Ok(Method::Post), "PUT" => Ok(Method::Put),
+            "DELETE" => Ok(Method::Delete), "HEAD" => Ok(Method::Head), "OPTIONS" => Ok(Method::Options),
+            "CONNECT" => Ok(Method::Connect), "TRACE" => Ok(Method::Trace), "PATCH" => Ok(Method::Patch),
+            _ => Err(HttpError::MethodError(Rc::from(s))),
         }
     }
 }
 
-impl From<Method> for &'static str {
-    fn from(m: Method) -> Self {
-        m.as_str()
-    }
-}
-
-impl std::fmt::Display for Method {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
+impl From<Method> for &'static str { fn from(m: Method) -> Self { m.as_str() } }
+impl std::fmt::Display for Method { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.as_str()) } }

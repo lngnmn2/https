@@ -2,7 +2,7 @@
 //!
 //! Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Messages
 
-use super::header::Header;
+use super::header::{Header, SecurityLevel};
 use super::status::Status;
 use super::body::Body;
 use super::error::HttpError;
@@ -11,8 +11,6 @@ use std::io::Cursor;
 use std::rc::Rc;
 
 /// An HTTP Response.
-///
-/// Encapsulates the status, headers, and body received from an HTTPS server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub(crate) status: Status,
@@ -21,46 +19,29 @@ pub struct Response {
 }
 
 impl Response {
-    /// Creates a new Response from its constituent parts.
+    /// Creates a new Response.
     pub fn new(status: Status, headers: impl Into<Rc<[Header]>>, body: Body) -> Self {
-        Self {
-            status,
-            headers: headers.into(),
-            body,
-        }
+        Self { status, headers: headers.into(), body }
     }
-
-    /// Returns the HTTP status.
-    pub const fn status(&self) -> Status {
-        self.status
-    }
-
-    /// Returns the response headers.
-    pub fn headers(&self) -> &[Header] {
-        &self.headers
-    }
-
-    /// Returns the response body.
-    pub const fn body(&self) -> &Body {
-        &self.body
-    }
+    /// Returns the status.
+    pub const fn status(&self) -> Status { self.status }
+    /// Returns the headers.
+    pub fn headers(&self) -> &[Header] { &self.headers }
+    /// Returns the body.
+    pub const fn body(&self) -> &Body { &self.body }
 }
 
 impl TryFrom<&[u8]> for Response {
     type Error = HttpError;
-
-    /// Natural Transformation from bytes to Response.
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let mut cursor = Cursor::new(bytes);
-        protocol::read_response(&mut cursor)
+        let cursor = Cursor::new(bytes);
+        // Note: For raw byte parsing, we assume Standard security level as we may 
+        // not have the full request context (which contains the intended policy).
+        protocol::read_response_pure(cursor, SecurityLevel::Standard).map(|(_, r)| r)
     }
 }
 
 impl TryFrom<Vec<u8>> for Response {
     type Error = HttpError;
-
-    /// Natural Transformation from Vec<u8> to Response.
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        Self::try_from(bytes.as_slice())
-    }
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> { Self::try_from(bytes.as_slice()) }
 }

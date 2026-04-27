@@ -1,41 +1,46 @@
 //! # Host Domain Model
 //!
-//! Validated Hostname (RFC 1123).
+//! Validated Hostname (RFC 1123) using persistent strings.
 
 use super::error::HttpError;
 use std::rc::Rc;
+use std::ops::Deref;
 
 /// Validated Hostname Newtype.
-/// Uses Rc<str> for immutable persistence and efficient sharing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Host(Rc<str>);
+
+impl Deref for Host {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl TryFrom<Rc<str>> for Host {
+    type Error = HttpError;
+    fn try_from(s: Rc<str>) -> Result<Self, Self::Error> {
+        let is_valid = !s.is_empty() 
+            && s.len() <= 253 
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+        
+        if is_valid { 
+            Ok(Self(s)) 
+        } else { 
+            Err(HttpError::UrlError(Rc::from(format!("Invalid Host: {}", s)))) 
+        }
+    }
+}
 
 impl TryFrom<String> for Host {
     type Error = HttpError;
-    /// Constructs a Host from a String, enforcing RFC 1123 validation.
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.is_empty() || s.len() > 253 || !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
-            return Err(HttpError::UrlError(format!("Invalid Host: {}", s)));
-        }
-        Ok(Self(Rc::from(s)))
-    }
+    fn try_from(s: String) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
 }
 
 impl TryFrom<&str> for Host {
     type Error = HttpError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::try_from(s.to_string())
-    }
+    fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
 }
 
-impl AsRef<str> for Host {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Host {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+impl AsRef<str> for Host { fn as_ref(&self) -> &str { self.0.as_ref() } }
+impl std::fmt::Display for Host { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }

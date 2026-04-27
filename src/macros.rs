@@ -22,7 +22,7 @@ macro_rules! get {
     };
 }
 
-/// Construct a POST request.
+/// Construct a POST request with a raw body.
 /// 
 /// # Example
 /// ```
@@ -39,5 +39,28 @@ macro_rules! post {
         $crate::SecureRequest::try_new($crate::Method::Post, $url)
             $(.and_then(|r| r.with_header($name, $val)))*
             .map(|r| r.with_body($body))
+    };
+}
+
+/// Construct a POST request with a JSON body.
+/// 
+/// # Example
+/// ```
+/// use https_client::post_json;
+/// use serde::Serialize;
+/// #[derive(Serialize)]
+/// struct Payload { symbol: &'static str }
+/// let req = post_json!("https://fapi.binance.com/fapi/v1/listenKey", json: &Payload { symbol: "BTCUSDT" });
+/// ```
+#[macro_export]
+macro_rules! post_json {
+    ($url:expr, json: $data:expr) => {
+        $crate::SecureRequest::try_new($crate::Method::Post, $url)
+            .and_then(|r| r.with_json($data))
+    };
+    ($url:expr, headers: { $($name:expr => $val:expr),* $(,)? }, json: $data:expr) => {
+        $crate::SecureRequest::try_new($crate::Method::Post, $url)
+            $(.and_then(|r| r.with_header($name, $val)))*
+            .and_then(|r| r.with_json($data))
     };
 }

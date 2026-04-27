@@ -15,7 +15,7 @@ pub mod macros;
 pub use domain::error::HttpError;
 pub use domain::request::{Request, SecureRequest, InitialRequest};
 pub use domain::response::Response;
-pub use domain::header::{Header, HeaderName, HeaderValue};
+pub use domain::header::{Header, HeaderName, HeaderValue, SecurityLevel};
 pub use domain::host::Host;
 pub use domain::port::Port;
 pub use domain::body::Body;

@@ -3,6 +3,7 @@
 //! Ref: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
 
 use super::error::HttpError;
+use std::rc::Rc;
 
 /// Validated HTTP response status codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -41,18 +42,18 @@ pub enum Status {
 
 impl Status {
     /// Returns the numerical status code.
-    pub const fn code(&self) -> u16 {
+    pub const fn code(self) -> u16 {
         match self {
             Status::Ok => 200, Status::Created => 201, Status::Accepted => 202, Status::NoContent => 204,
             Status::MovedPermanently => 301, Status::Found => 302,
             Status::BadRequest => 400, Status::Unauthorized => 401, Status::Forbidden => 403, Status::NotFound => 404,
             Status::InternalServerError => 500, Status::NotImplemented => 501, Status::BadGateway => 502, Status::ServiceUnavailable => 503,
-            Status::Unknown(c) => *c,
+            Status::Unknown(c) => c,
         }
     }
 
     /// Returns the standard reason phrase.
-    pub const fn reason_phrase(&self) -> &'static str {
+    pub const fn reason_phrase(self) -> &'static str {
         match self {
             Status::Ok => "OK", Status::Created => "Created", Status::Accepted => "Accepted", Status::NoContent => "No Content",
             Status::MovedPermanently => "Moved Permanently", Status::Found => "Found",
@@ -64,7 +65,6 @@ impl Status {
 }
 
 impl From<u16> for Status {
-    /// Constructs a Status from a numerical code.
     fn from(c: u16) -> Self {
         match c {
             200 => Status::Ok, 201 => Status::Created, 202 => Status::Accepted, 204 => Status::NoContent,
@@ -78,14 +78,9 @@ impl From<u16> for Status {
 
 impl TryFrom<&str> for Status {
     type Error = HttpError;
-    /// Constructs a Status from a string slice representing a numerical code.
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse::<u16>().map(Status::from).map_err(|_| HttpError::ResponseError(format!("Invalid Status Code: {}", s)))
+        s.parse::<u16>().map(Status::from).map_err(|_| HttpError::ResponseError(Rc::from(format!("Invalid Status Code: {}", s))))
     }
 }
 
-impl std::fmt::Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.code(), self.reason_phrase())
-    }
-}
+impl std::fmt::Display for Status { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{} {}", self.code(), self.reason_phrase()) } }
