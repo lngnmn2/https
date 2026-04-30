@@ -44,7 +44,7 @@ pub fn plan<H, B>(req: &SecureRequest<H, B>) -> Result<Expr<Response>, HttpError
 // 2. WIRE SERIALIZATION (Pure Transformation)
 // ----------------------------------------------------------------------------
 
-/// Formats a Request into its wire representation as a pure transformation.
+/// Formats a Request into its wire representation.
 pub fn format_request<H, B>(req: &SecureRequest<H, B>) -> Result<Vec<u8>, HttpError> {
     let line = format!("{} {} HTTP/1.1\r\n", req.method().as_str(), req.url().path());
     let mandatory = [
@@ -69,16 +69,15 @@ pub fn format_request<H, B>(req: &SecureRequest<H, B>) -> Result<Vec<u8>, HttpEr
 
 /// Reads and parses an HTTP response from a raw reader.
 pub fn read_response_pure<R: Read>(reader: R, level: SecurityLevel) -> Result<(R, Response), HttpError> {
-    // Note: BufReader and read_line necessitate local mutation at the I/O boundary.
-    // We isolate this within this specific infrastructure adapter.
     let mut br = BufReader::new(reader);
     let status = parse_status(&read_line_internal(&mut br)?)?;
     let headers = read_headers_internal(&mut br)?;
     
-    validate_protocol_invariants(&headers)
-        .and_then(|_| crate::domain::header::validate_security_headers(&headers, level))
-        .and_then(|_| read_body_internal(&mut br, &headers))
-        .map(|body| (br.into_inner(), Response::new(status, headers, body)))
+    validate_protocol_invariants(&headers)?;
+    crate::domain::header::validate_security_headers(&headers, level)?;
+    
+    let body = read_body_internal(&mut br, &headers)?;
+    Ok((br.into_inner(), Response::new(status, headers, body)))
 }
 
 fn read_line_internal<R: BufRead>(r: &mut R) -> Result<String, HttpError> {

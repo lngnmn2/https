@@ -4,7 +4,7 @@
 //! Refactored for Pure Functional compliance.
 
 use https_client::interpreter::{protocol, runner};
-use https_client::domain::{HttpError, InitialRequest, Method, Body, SecurityLevel};
+use https_client::domain::{HttpError, InitialRequest, Method, SecurityLevel};
 use std::io::Cursor;
 
 #[test]
@@ -95,9 +95,8 @@ fn test_regression_body_limit_enforcement() -> Result<(), Box<dyn std::error::Er
 
 #[test]
 fn test_regression_mandatory_peer_verification() -> Result<(), Box<dyn std::error::Error>> {
-    // untrusted-root.badssl.com should be rejected by mandatory peer verification
     let req = InitialRequest::try_new(Method::Get, "https://untrusted-root.badssl.com/")?
-        .with_body(Body::default());
+        .build();
     
     let res = runner::execute(&req);
     match res {

@@ -142,10 +142,11 @@ impl<A: 'static> StgMachine<A> {
 
     /// Pure Recursive Evaluation.
     pub fn evaluate(self, expr: Expr<A>) -> Result<Rc<A>, HttpError> {
-        self.step(expr).and_then(|(next_machine, control)| match control {
+        let (next_machine, control) = self.step(expr)?;
+        match control {
             Control::Continue(e) => next_machine.evaluate(e),
             Control::Halt(v) => Ok(v),
-        })
+        }
     }
 
     fn step(self, expr: Expr<A>) -> Result<(Self, Control<A>), HttpError> {
@@ -159,9 +160,18 @@ impl<A: 'static> StgMachine<A> {
                 let next_stack = self.stack.push(Frame::ReturnTo(k));
                 Ok((StgMachine { stack: next_stack, ..self }, Control::Continue(*t)))
             }
-            Expr::App(a) => self.enter_address(a).map(|(m, e)| (m, Control::Continue(e))),
-            Expr::Pure(atom) => self.unwrap_atom(atom).and_then(|(m, v)| m.rule_ret(v)),
-            p => self.rule_prim(p).map(|(m, e)| (m, Control::Continue(e))),
+            Expr::App(a) => {
+                let (m, e) = self.enter_address(a)?;
+                Ok((m, Control::Continue(e)))
+            }
+            Expr::Pure(atom) => {
+                let (m, v) = self.unwrap_atom(atom)?;
+                m.rule_ret(v)
+            }
+            p => {
+                let (m, e) = self.rule_prim(p)?;
+                Ok((m, Control::Continue(e)))
+            }
         }
     }
 
@@ -181,11 +191,11 @@ impl<A: 'static> StgMachine<A> {
     fn rule_prim(self, p: Expr<A>) -> Result<(Self, Expr<A>), HttpError> {
         match p {
             Expr::OpConnect(h, p) => {
-                let conn = handle_connect(h.as_ref(), p.code())?;
+                let conn = handle_connect(&*h, p.code())?;
                 StgMachine { conn, ..self }.yield_r(dummy())
             }
             Expr::OpHandshake(h) => {
-                let conn = handle_handshake(self.conn, h.as_ref())?;
+                let conn = handle_handshake(self.conn, &*h)?;
                 StgMachine { conn, ..self }.yield_r(dummy())
             }
             Expr::OpWrite(d) => {
@@ -216,10 +226,13 @@ impl<A: 'static> StgMachine<A> {
     fn unwrap_atom(self, a: Atom<A>) -> Result<(Self, Rc<A>), HttpError> {
         match a {
             Atom::Lit(v) => Ok((self, v)),
-            Atom::Var(addr) => self.enter_address(addr).and_then(|(m, e)| match e {
-                Expr::Pure(Atom::Lit(v)) => Ok((m, v)),
-                _ => Err(HttpError::RuntimeError(Rc::from("Atom Resolution Failed"))),
-            })
+            Atom::Var(addr) => {
+                let (m, e) = self.enter_address(addr)?;
+                match e {
+                    Expr::Pure(Atom::Lit(v)) => Ok((m, v)),
+                    _ => Err(HttpError::RuntimeError(Rc::from("Atom Resolution Failed"))),
+                }
+            }
         }
     }
 

@@ -1,33 +1,52 @@
 //! # DSL Macros
 //! 
-//! Declarative macros for constructing HTTPS requests.
+//! Declarative macros for high-level HTTPS interaction.
 
-/// Construct a GET request.
+/// Construct a GET request with optional headers and security level.
 /// 
-/// # Example
+/// # Examples
 /// ```
-/// use https_client::get;
-/// let req = get!("https://api.binance.com/api/v3/ping");
+/// use https_client::{get, SecurityLevel};
+/// let req1 = get!("https://api.binance.com/api/v3/ping");
+/// let req2 = get!("https://api.binance.com/api/v3/ping", 
+///     headers: { "X-MBX-APIKEY" => "test" });
+/// let req3 = get!("https://api.hyperliquid.xyz/info", 
+///     security: SecurityLevel::None);
 /// ```
 #[macro_export]
 macro_rules! get {
     ($url:expr) => {
         $crate::SecureRequest::try_new($crate::Method::Get, $url)
-            .map(|r| r.with_body($crate::Body::default()))
+            .map(|r| r.build())
     };
     ($url:expr, headers: { $($name:expr => $val:expr),* $(,)? }) => {
         $crate::SecureRequest::try_new($crate::Method::Get, $url)
             $(.and_then(|r| r.with_header($name, $val)))*
-            .map(|r| r.with_body($crate::Body::default()))
+            .map(|r| r.build())
+    };
+    ($url:expr, security: $level:expr) => {
+        $crate::SecureRequest::try_new($crate::Method::Get, $url)
+            .map(|r| r.with_security_level($level).build())
+    };
+    ($url:expr, headers: { $($name:expr => $val:expr),* $(,)? }, security: $level:expr) => {
+        $crate::SecureRequest::try_new($crate::Method::Get, $url)
+            $(.and_then(|r| r.with_header($name, $val)))*
+            .map(|r| r.with_security_level($level).build())
+    };
+    ($url:expr, security: $level:expr, headers: { $($name:expr => $val:expr),* $(,)? }) => {
+        $crate::SecureRequest::try_new($crate::Method::Get, $url)
+            .map(|r| r.with_security_level($level))
+            $(.and_then(|r| r.with_header($name, $val)))*
+            .map(|r| r.build())
     };
 }
 
-/// Construct a POST request with a raw body.
+/// Construct a POST request with a body and optional headers/security.
 /// 
-/// # Example
+/// # Examples
 /// ```
-/// use https_client::post;
-/// let req = post!("https://api.binance.com/api/v3/userDataStream", body: vec![]);
+/// use https_client::{post, Body, SecurityLevel};
+/// let req1 = post!("https://api.hyperliquid.xyz/info", body: Body::from(b"test".to_vec()));
 /// ```
 #[macro_export]
 macro_rules! post {
@@ -40,27 +59,19 @@ macro_rules! post {
             $(.and_then(|r| r.with_header($name, $val)))*
             .map(|r| r.with_body($body))
     };
-}
-
-/// Construct a POST request with a JSON body.
-/// 
-/// # Example
-/// ```
-/// use https_client::post_json;
-/// use serde::Serialize;
-/// #[derive(Serialize)]
-/// struct Payload { symbol: &'static str }
-/// let req = post_json!("https://fapi.binance.com/fapi/v1/listenKey", json: &Payload { symbol: "BTCUSDT" });
-/// ```
-#[macro_export]
-macro_rules! post_json {
-    ($url:expr, json: $data:expr) => {
+    ($url:expr, security: $level:expr, body: $body:expr) => {
         $crate::SecureRequest::try_new($crate::Method::Post, $url)
-            .and_then(|r| r.with_json($data))
+            .map(|r| r.with_security_level($level).with_body($body))
     };
-    ($url:expr, headers: { $($name:expr => $val:expr),* $(,)? }, json: $data:expr) => {
+    ($url:expr, headers: { $($name:expr => $val:expr),* $(,)? }, security: $level:expr, body: $body:expr) => {
         $crate::SecureRequest::try_new($crate::Method::Post, $url)
             $(.and_then(|r| r.with_header($name, $val)))*
-            .and_then(|r| r.with_json($data))
+            .map(|r| r.with_security_level($level).with_body($body))
+    };
+    ($url:expr, security: $level:expr, headers: { $($name:expr => $val:expr),* $(,)? }, body: $body:expr) => {
+        $crate::SecureRequest::try_new($crate::Method::Post, $url)
+            .map(|r| r.with_security_level($level))
+            $(.and_then(|r| r.with_header($name, $val)))*
+            .map(|r| r.with_body($body))
     };
 }

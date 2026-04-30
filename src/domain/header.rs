@@ -11,47 +11,32 @@ use std::ops::Deref;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HeaderName(Rc<str>);
 
-impl Deref for HeaderName {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
+impl Deref for HeaderName { type Target = str; fn deref(&self) -> &str { &self.0 } }
 
 impl TryFrom<Rc<str>> for HeaderName {
     type Error = HttpError;
     fn try_from(s: Rc<str>) -> Result<Self, Self::Error> {
-        let is_token = !s.is_empty() 
+        let is_valid = !s.is_empty() 
             && s.chars().all(|c| c.is_ascii_alphanumeric() || "-!#$%&'*+.^_`|~".contains(c));
         
-        if is_token { 
+        if is_valid { 
             Ok(Self(s)) 
         } else { 
-            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Name Token: {}", s)))) 
+            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Name Token: {}", &*s)))) 
         }
     }
 }
 
-impl TryFrom<&str> for HeaderName {
-    type Error = HttpError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::try_from(Rc::from(s))
-    }
-}
-
-impl AsRef<str> for HeaderName { fn as_ref(&self) -> &str { self.0.as_ref() } }
-impl std::fmt::Display for HeaderName { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }
+impl TryFrom<String> for HeaderName { type Error = HttpError; fn try_from(s: String) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) } }
+impl TryFrom<&str> for HeaderName { type Error = HttpError; fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) } }
+impl AsRef<str> for HeaderName { fn as_ref(&self) -> &str { &self.0 } }
+impl std::fmt::Display for HeaderName { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", &*self.0) } }
 
 /// Validated Header Value (RFC 7230 visible ASCII).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct HeaderValue(Rc<str>);
 
-impl Deref for HeaderValue {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
+impl Deref for HeaderValue { type Target = str; fn deref(&self) -> &str { &self.0 } }
 
 impl TryFrom<Rc<str>> for HeaderValue {
     type Error = HttpError;
@@ -61,20 +46,15 @@ impl TryFrom<Rc<str>> for HeaderValue {
         if is_valid { 
             Ok(Self(s)) 
         } else { 
-            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Value: {}", s)))) 
+            Err(HttpError::HeaderError(Rc::from(format!("Invalid Header Value: {}", &*s)))) 
         }
     }
 }
 
-impl TryFrom<&str> for HeaderValue {
-    type Error = HttpError;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::try_from(Rc::from(s))
-    }
-}
-
-impl AsRef<str> for HeaderValue { fn as_ref(&self) -> &str { self.0.as_ref() } }
-impl std::fmt::Display for HeaderValue { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }
+impl TryFrom<String> for HeaderValue { type Error = HttpError; fn try_from(s: String) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) } }
+impl TryFrom<&str> for HeaderValue { type Error = HttpError; fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) } }
+impl AsRef<str> for HeaderValue { fn as_ref(&self) -> &str { &self.0 } }
+impl std::fmt::Display for HeaderValue { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", &*self.0) } }
 
 /// An Atomic HTTP Header.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,7 +78,7 @@ impl Header {
 impl TryFrom<&str> for Header {
     type Error = HttpError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let parts: Rc<[&str]> = s.splitn(2, ':').collect();
+        let parts: Vec<&str> = s.splitn(2, ':').collect();
         if parts.len() != 2 { 
             return Err(HttpError::HeaderError(Rc::from(format!("Malformed Header Line: {}", s)))); 
         }
@@ -108,7 +88,7 @@ impl TryFrom<&str> for Header {
 
 impl std::fmt::Display for Header {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.name, self.value)
+        write!(f, "{}: {}", &*self.name, &*self.value)
     }
 }
 
@@ -117,19 +97,15 @@ impl std::fmt::Display for Header {
 pub enum SecurityLevel {
     /// No mandatory headers enforced.
     None,
-    /// Minimum requirements for production (Ensures framing integrity).
-    Minimal,
-    /// Enforces Nosniff and Basic CSP.
+    /// Minimum viable security (Allows missing HSTS/Nosniff for production parity).
     Standard,
-    /// Enforces HSTS, Nosniff, and Strict CSP (Financial Grade).
+    /// Enforces HSTS, Nosniff, and Strict CSP.
     #[default] Strict,
 }
 
 /// Formal Specification for Financial Grade Security Headers.
 pub fn validate_security_headers(headers: &[Header], level: SecurityLevel) -> Result<(), HttpError> {
-    if matches!(level, SecurityLevel::None) || matches!(level, SecurityLevel::Minimal) { 
-        return Ok(()); 
-    }
+    if matches!(level, SecurityLevel::None) { return Ok(()); }
     
     let check = |name: &str| headers.iter().any(|h| h.name().as_ref().eq_ignore_ascii_case(name));
     

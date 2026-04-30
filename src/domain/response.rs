@@ -36,7 +36,7 @@ impl TryFrom<&[u8]> for Response {
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         let cursor = Cursor::new(bytes);
         // Note: For raw byte parsing, we assume Standard security level as we may 
-        // not have the full request context (which contains the intended policy).
+        // not have the full request context.
         protocol::read_response_pure(cursor, SecurityLevel::Standard).map(|(_, r)| r)
     }
 }

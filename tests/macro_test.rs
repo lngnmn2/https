@@ -1,6 +1,6 @@
-//! Macro DSL tests.
+//! Macro DSL behavioral tests.
 
-use https_client::{get, post, Method, Body, HeaderName};
+use https_client::{get, post, Method, Body, HeaderName, SecurityLevel};
 
 #[test]
 fn test_get_macro_simple() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,29 +28,25 @@ fn test_get_macro_with_headers() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_post_macro_simple() -> Result<(), Box<dyn std::error::Error>> {
-    let body_data = b"123";
-    let req = post!("https://api.binance.com/api/v3/userDataStream", 
-        body: Body::from(body_data.as_slice())
-    )?;
-    
-    if req.method() == &Method::Post && req.body().as_ref() == b"123" {
+fn test_get_macro_security_level() -> Result<(), Box<dyn std::error::Error>> {
+    let req = get!("https://api.hyperliquid.xyz/info", security: SecurityLevel::Standard)?;
+    if req.security_level() == SecurityLevel::Standard {
         Ok(())
     } else {
-        Err("POST failed".into())
+        Err("Security level mismatch".into())
     }
 }
 
 #[test]
-fn test_post_macro_with_headers() -> Result<(), Box<dyn std::error::Error>> {
-    let req = post!("https://api.binance.com/api/v3/userDataStream", 
+fn test_post_macro_with_headers_and_body() -> Result<(), Box<dyn std::error::Error>> {
+    let req = post!("https://api.binance.com/api/v3/order", 
         headers: {
             "X-MBX-APIKEY" => "my-api-key"
         },
-        body: Body::default()
+        body: Body::from(b"test".as_slice())
     )?;
     
-    if req.headers().len() == 1 && req.headers()[0].name() == &HeaderName::try_from("X-MBX-APIKEY")? {
+    if req.method() == &Method::Post && req.body().as_ref() == b"test" {
         Ok(())
     } else {
         Err("Macro failed".into())

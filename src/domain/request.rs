@@ -1,6 +1,6 @@
 //! # HTTPS Request (Typestate Model)
 //!
-//! Pure functional request construction using Rc persistent data.
+//! Pure functional request construction using a declarative Typestate DSL.
 
 use super::method::Method;
 use super::header::{Header, SecurityLevel};
@@ -9,7 +9,6 @@ use super::error::HttpError;
 use url::Url;
 use core::marker::PhantomData;
 use std::rc::Rc;
-use serde::Serialize;
 
 // --- TYPESTATE MARKERS ---
 /// Marker: Host invariant satisfied.
@@ -39,7 +38,6 @@ pub type InitialRequest = SecureRequest<HasHost, Initial>;
 
 impl TryFrom<(&str, &str)> for InitialRequest {
     type Error = HttpError;
-    /// Constructs an InitialRequest from a pair.
     fn try_from((m, u): (&str, &str)) -> Result<Self, Self::Error> {
         SecureRequest::try_new(m.try_into()?, u)
     }
@@ -49,8 +47,8 @@ impl SecureRequest<HasHost, Initial> {
     /// Initial Algebra: Creation.
     pub fn try_new(method: Method, url: impl Into<Rc<str>>) -> Result<Self, HttpError> {
         let u = Url::parse(&*url.into())?;
-        let _s = if u.scheme() != "https" { return Err(HttpError::InsecureScheme(Rc::from(u.scheme()))); } else { u.scheme() };
-        let _h = u.host_str().ok_or(HttpError::UrlError(Rc::from("Missing Host")))?;
+        if u.scheme() != "https" { return Err(HttpError::InsecureScheme(Rc::from(u.scheme()))); }
+        let _ = u.host_str().ok_or(HttpError::UrlError(Rc::from("Missing Host")))?;
 
         Ok(Self {
             method, url: u, headers: Rc::from([]), body: Body::default(),
@@ -59,29 +57,12 @@ impl SecureRequest<HasHost, Initial> {
         })
     }
 
-    /// Monadic Transformation: Header addition (Zero-mut).
+    /// Monadic Transformation: Header addition.
     pub fn with_header(self, k: impl Into<Rc<str>>, v: impl Into<Rc<str>>) -> Result<Self, HttpError> {
         let h = Header::try_new(k.into(), v.into())?;
         Ok(Self {
             headers: self.headers.iter().cloned().chain(std::iter::once(h)).collect::<Rc<[Header]>>(),
             ..self
-        })
-    }
-
-    /// Pure transformation to JSON body.
-    pub fn with_json<T: Serialize>(self, data: &T) -> Result<Request, HttpError> {
-        let json_bytes = serde_json::to_vec(data).map_err(|e| HttpError::RuntimeError(Rc::from(e.to_string())))?;
-        
-        self.with_header("Content-Type", "application/json").map(|req| {
-            SecureRequest {
-                method: req.method,
-                url: req.url,
-                headers: req.headers,
-                body: Body::from(json_bytes),
-                security_level: req.security_level,
-                _h: PhantomData,
-                _b: PhantomData,
-            }
         })
     }
 
@@ -93,10 +74,15 @@ impl SecureRequest<HasHost, Initial> {
             _h: PhantomData, _b: PhantomData,
         }
     }
+    
+    /// Shortcut for empty body terminal transition.
+    pub fn build(self) -> Request {
+        self.with_body(Body::default())
+    }
 }
 
 impl<H, B> SecureRequest<H, B> {
-    /// Configures the security level for this request.
+    /// Configures the security level.
     pub fn with_security_level(self, security_level: SecurityLevel) -> Self {
         Self { security_level, ..self }
     }

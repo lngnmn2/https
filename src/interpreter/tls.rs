@@ -10,18 +10,19 @@ use std::rc::Rc;
 
 /// Performs a TLS handshake.
 pub fn connect_tls(host: &str, stream: TcpStream) -> Result<SslStream<TcpStream>, HttpError> {
-    let builder = configure_connector(SslConnector::builder(SslMethod::tls())?);
-    builder.build().connect(host, stream).map_err(Into::into)
+    configure_connector(SslConnector::builder(SslMethod::tls())?)?
+        .build()
+        .connect(host, stream)
+        .map_err(Into::into)
 }
 
-fn configure_connector(builder: SslConnectorBuilder) -> SslConnectorBuilder {
-    // Note: External builder API necessitates local mutation for configuration.
-    // We isolate this at the infrastructure boundary.
+fn configure_connector(builder: SslConnectorBuilder) -> Result<SslConnectorBuilder, HttpError> {
+    // Note: Builder API necessitates local mutation for configuration.
     let mut b = builder;
     b.set_verify(SslVerifyMode::PEER);
-    let _ = b.set_min_proto_version(Some(openssl::ssl::SslVersion::TLS1_2));
-    let _ = b.set_cipher_list("ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256");
-    b
+    b.set_min_proto_version(Some(openssl::ssl::SslVersion::TLS1_2))?;
+    b.set_cipher_list("ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256")?;
+    Ok(b)
 }
 
 /// Pure functional wrapper for TLS write operations.

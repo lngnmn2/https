@@ -13,7 +13,7 @@ pub struct Host(Rc<str>);
 impl Deref for Host {
     type Target = str;
     fn deref(&self) -> &str {
-        self.0.as_ref()
+        &self.0
     }
 }
 
@@ -27,7 +27,7 @@ impl TryFrom<Rc<str>> for Host {
         if is_valid { 
             Ok(Self(s)) 
         } else { 
-            Err(HttpError::UrlError(Rc::from(format!("Invalid Host: {}", s)))) 
+            Err(HttpError::UrlError(Rc::from(format!("Invalid Host: {}", &*s)))) 
         }
     }
 }
@@ -42,5 +42,5 @@ impl TryFrom<&str> for Host {
     fn try_from(s: &str) -> Result<Self, Self::Error> { Self::try_from(Rc::from(s)) }
 }
 
-impl AsRef<str> for Host { fn as_ref(&self) -> &str { self.0.as_ref() } }
-impl std::fmt::Display for Host { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.0) } }
+impl AsRef<str> for Host { fn as_ref(&self) -> &str { &self.0 } }
+impl std::fmt::Display for Host { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", &*self.0) } }
